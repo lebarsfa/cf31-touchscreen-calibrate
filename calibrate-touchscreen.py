@@ -15,11 +15,16 @@ installs it.
 import fcntl, struct, os, sys, re
 
 DEV_NAME = "Fujitsu Component USB Touch Panel"
-RULE = "/etc/udev/rules.d/99-cf31-touchscreen-calibration.rules"
-USB_ID = ("0430", "0502")
-EV_KEY, EV_ABS, BTN_LEFT, ABS_X, ABS_Y = 1, 3, 0x110, 0, 1
-FMT, SZ = 'llHHi', 24
+RULE = "/etc/udev/rules.d/99-cf19-mk4-touchscreen-calibration.rules"
+USB_ID = ("0430", "0530")
 
+EV_KEY = 1
+EV_ABS = 3
+BTN_TOUCH = 0x14a       # 330
+ABS_X = 0
+ABS_Y = 1
+
+FMT, SZ = 'llHHi', 24
 
 def find_device():
     """Return (devnode, sysfs_path) for the touch panel."""
@@ -67,7 +72,7 @@ def capture(fd, label):
         _, _, typ, code, val = struct.unpack(FMT, os.read(fd, SZ))
         if typ == EV_ABS and code in (ABS_X, ABS_Y):
             cur[code] = val
-        elif typ == EV_KEY and code == BTN_LEFT:
+        elif typ == EV_KEY and code == BTN_TOUCH:
             if val == 1:
                 touching, xs, ys = True, [], []
             elif val == 0 and touching:
@@ -131,7 +136,7 @@ def main():
         print("  Note: X and Y are SWAPPED on this panel (the matrix corrects it).")
     print("=" * 62)
 
-    line = ('SUBSYSTEM=="input", ATTRS{idVendor}=="%s", ATTRS{idProduct}=="%s", '
+    line = ('SUBSYSTEM=="input", ATTRS{idVendor}=="%s", ATTRS{idProduct}=="%s", ENV{ID_INPUT_TABLET}="0", ENV{ID_INPUT_TOUCHSCREEN}="1", '
             'ENV{LIBINPUT_CALIBRATION_MATRIX}="%s"\n'
             % (USB_ID[0], USB_ID[1], " ".join("%.6f" % v for v in m)))
     try:
@@ -143,11 +148,10 @@ def main():
         return
 
     with open(RULE, 'w') as f:
-        f.write("# Panasonic CF-31/CF-19 Fujitsu touch panel (USB %s:%s).\n" % USB_ID)
-        f.write("# The panel reports ABS_X/ABS_Y with no BTN_TOUCH and no\n")
-        f.write("# INPUT_PROP_DIRECT, so udev tags it ID_INPUT_MOUSE and ordinary\n")
-        f.write("# calibration tools cannot see it. libinput applies this matrix\n")
-        f.write("# regardless of that misclassification.\n")
+        f.write("# Panasonic Toughbook CF-19 Mk4 Fujitsu touch panel (USB %s:%s).\n" % USB_ID)
+        f.write("# Device: Fujitsu Component USB Touch Panel\n")
+        f.write("# ABS_X/ABS_Y range: 0..4096, contact reported via BTN_TOUCH.\n")
+        f.write("# Calibration matrix for libinput/Wayland.\n")
         f.write("# Regenerate with calibrate-touchscreen.py; delete to reset.\n")
         f.write(line)
     print("Wrote %s" % RULE)
