@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """3-point affine calibration for the Panasonic CF-31/CF-19 Fujitsu touch panel.
 
-This panel reports ABS_X/ABS_Y but signals contact with BTN_LEFT rather than
+Some panels report ABS_X/ABS_Y but signals contact with BTN_LEFT rather than
 BTN_TOUCH, and never sets INPUT_PROP_DIRECT. udev therefore tags it
 ID_INPUT_MOUSE and never ID_INPUT_TOUCHSCREEN, so xinput_calibrator and GNOME's
 touchscreen settings cannot see it at all. Under Wayland, xinput cannot set
@@ -15,10 +15,35 @@ installs it.
 import fcntl, struct, os, sys, re
 
 DEV_NAME = "Fujitsu Component USB Touch Panel"
-RULE = "/etc/udev/rules.d/99-cf31-touchscreen-calibration.rules"
-USB_ID = ("0430", "0502")
-EV_KEY, EV_ABS, BTN_LEFT, ABS_X, ABS_Y = 1, 3, 0x110, 0, 1
+RULE = "/etc/udev/rules.d/99-touchscreen-calibration.rules"
+
+EV_KEY = 1
+EV_ABS = 3
+BTN_LEFT = 0x110
+BTN_TOUCH = 0x14a
+ABS_X = 0
+ABS_Y = 1
+
 FMT, SZ = 'llHHi', 24
+
+
+def select_model():
+    print("Select Panasonic Toughbook model:")
+    print("  1) CF-31 Mk5")
+    print("  2) CF-19 Mk4")
+
+    while True:
+        try:
+            answer = input("\nModel [1/2]: ").strip()
+        except EOFError:
+            sys.exit("No model selected.")
+
+        if answer == '1':
+            return "CF-31 Mk5", ("0430", "0502"), BTN_LEFT
+        elif answer == '2':
+            return "CF-19 Mk4", ("0430", "0530"), BTN_TOUCH
+
+        print("Please enter 1 or 2.")
 
 
 def find_device():
@@ -59,7 +84,7 @@ def median(vals):
     return sorted(vals)[len(vals) // 2]
 
 
-def capture(fd, label):
+def capture(fd, label, touch_button):
     """Block until one complete touch (press..release); return median raw (x, y)."""
     print("\n  >>> Touch and HOLD the %s corner, then lift your finger." % label)
     xs, ys, cur, touching = [], [], {}, False
@@ -67,7 +92,7 @@ def capture(fd, label):
         _, _, typ, code, val = struct.unpack(FMT, os.read(fd, SZ))
         if typ == EV_ABS and code in (ABS_X, ABS_Y):
             cur[code] = val
-        elif typ == EV_KEY and code == BTN_LEFT:
+        elif typ == EV_KEY and code == touch_button:
             if val == 1:
                 touching, xs, ys = True, [], []
             elif val == 0 and touching:
@@ -100,6 +125,11 @@ def solve3(A, b):
 def main():
     if os.geteuid() != 0:
         sys.exit("Run with sudo.")
+
+    model, USB_ID, TOUCH_BUTTON = select_model()
+
+    print("\nModel    : %s" % model)
+
     dev, sysfs = find_device()
     port = usb_port(sysfs)
     fd = os.open(dev, os.O_RDONLY)
@@ -107,13 +137,15 @@ def main():
     _, ymin, ymax, _, _, _ = absinfo(fd, ABS_Y)
     print("Device   : %s  (%s)" % (dev, DEV_NAME))
     print("Ranges   : X %d..%d   Y %d..%d" % (xmin, xmax, ymin, ymax))
+    print("USB ID   : %s:%s" % USB_ID)
     print("USB port : %s" % (port or "unknown (will need a reboot to apply)"))
     print("\nTouch each corner as close to the very edge of the glass as you can.")
     print("Accuracy here sets accuracy everywhere. Ctrl-C to abort.")
 
     grab(fd, True)
     try:
-        pts = [capture(fd, l) for l in ("TOP-LEFT", "TOP-RIGHT", "BOTTOM-LEFT")]
+        pts = [capture(fd, l, TOUCH_BUTTON)
+               for l in ("TOP-LEFT", "TOP-RIGHT", "BOTTOM-LEFT")]
     finally:
         grab(fd, False)
 
@@ -131,9 +163,20 @@ def main():
         print("  Note: X and Y are SWAPPED on this panel (the matrix corrects it).")
     print("=" * 62)
 
-    line = ('SUBSYSTEM=="input", ATTRS{idVendor}=="%s", ATTRS{idProduct}=="%s", '
-            'ENV{LIBINPUT_CALIBRATION_MATRIX}="%s"\n'
-            % (USB_ID[0], USB_ID[1], " ".join("%.6f" % v for v in m)))
+    if model == "CF-19 Mk4":
+        line = ('SUBSYSTEM=="input", ATTRS{idVendor}=="%s", '
+                'ATTRS{idProduct}=="%s", ENV{ID_INPUT_TABLET}="0", '
+                'ENV{ID_INPUT_TOUCHSCREEN}="1", '
+                'ENV{LIBINPUT_CALIBRATION_MATRIX}="%s"\n'
+                % (USB_ID[0], USB_ID[1],
+                   " ".join("%.6f" % v for v in m)))
+    else:
+        line = ('SUBSYSTEM=="input", ATTRS{idVendor}=="%s", '
+                'ATTRS{idProduct}=="%s", '
+                'ENV{LIBINPUT_CALIBRATION_MATRIX}="%s"\n'
+                % (USB_ID[0], USB_ID[1],
+                   " ".join("%.6f" % v for v in m)))
+
     try:
         answer = input("\nWrite this to %s ? [y/N] " % RULE)
     except EOFError:
@@ -143,11 +186,19 @@ def main():
         return
 
     with open(RULE, 'w') as f:
-        f.write("# Panasonic CF-31/CF-19 Fujitsu touch panel (USB %s:%s).\n" % USB_ID)
-        f.write("# The panel reports ABS_X/ABS_Y with no BTN_TOUCH and no\n")
-        f.write("# INPUT_PROP_DIRECT, so udev tags it ID_INPUT_MOUSE and ordinary\n")
-        f.write("# calibration tools cannot see it. libinput applies this matrix\n")
-        f.write("# regardless of that misclassification.\n")
+        if model == "CF-19 Mk4":
+            f.write("# Panasonic Toughbook CF-19 Mk4 Fujitsu touch panel "
+                    "(USB %s:%s).\n" % USB_ID)
+            f.write("# Device: Fujitsu Component USB Touch Panel\n")
+            f.write("# The panel reports ABS_X/ABS_Y with contact reported via BTN_TOUCH.\n")
+            f.write("# Calibration matrix for libinput/Wayland.\n")
+        else:
+            f.write("# Panasonic Toughbook CF-31 Mk5 Fujitsu touch panel "
+                    "(USB %s:%s).\n" % USB_ID)
+            f.write("# The panel reports ABS_X/ABS_Y with no BTN_TOUCH and no\n")
+            f.write("# INPUT_PROP_DIRECT, so udev tags it ID_INPUT_MOUSE and ordinary\n")
+            f.write("# calibration tools cannot see it. libinput applies this matrix\n")
+            f.write("# regardless of that misclassification.\n")
         f.write("# Regenerate with calibrate-touchscreen.py; delete to reset.\n")
         f.write(line)
     print("Wrote %s" % RULE)
