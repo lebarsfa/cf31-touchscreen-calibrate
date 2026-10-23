@@ -31,11 +31,12 @@ def select_model():
     print("Select Panasonic Toughbook model:")
     print("  1) CF-31 Mk5")
     print("  2) CF-19 Mk4")
-    print("  3) CF-19 Mk7")
+    print("  3) CF-19 Mk5")
+    print("  4) CF-19 Mk7")
 
     while True:
         try:
-            answer = input("\nModel [1/2/3]: ").strip()
+            answer = input("\nModel [1/2/3/4]: ").strip()
         except EOFError:
             sys.exit("No model selected.")
 
@@ -44,10 +45,11 @@ def select_model():
         elif answer == '2':
             return "CF-19 Mk4", ("0430", "0530"), BTN_TOUCH
         elif answer == '3':
+            return "CF-19 Mk5", ("0430", "0532"), BTN_TOUCH
+        elif answer == '4':
             return "CF-19 Mk7", ("0430", "056b"), BTN_TOUCH
 
-        print("Please enter 1, 2, or 3.")
-
+        print("Please enter 1, 2, 3, or 4.")
 
 def find_device():
     """Return (devnode, sysfs_path) for the touch panel."""
@@ -166,7 +168,7 @@ def main():
         print("  Note: X and Y are SWAPPED on this panel (the matrix corrects it).")
     print("=" * 62)
 
-    if model == "CF-19 Mk4" or model == "CF-19 Mk7":
+    if model == "CF-19 Mk4" or model == "CF-19 Mk5" or model == "CF-19 Mk7":
         line = ('SUBSYSTEM=="input", ATTRS{idVendor}=="%s", '
                 'ATTRS{idProduct}=="%s", ENV{ID_INPUT_TABLET}="0", '
                 'ENV{ID_INPUT_TOUCHSCREEN}="1", '
@@ -191,7 +193,7 @@ def main():
     with open(RULE, 'w') as f:
         f.write("# Panasonic Toughbook %s Fujitsu touch panel "
                 "(USB %s:%s).\n" % (model, USB_ID[0], USB_ID[1]))
-        if model == "CF-19 Mk4" or model == "CF-19 Mk7":
+        if model == "CF-19 Mk4" or model == "CF-19 Mk5" or model == "CF-19 Mk7":
             f.write("# Device: Fujitsu Component USB Touch Panel\n")
             f.write("# The panel reports ABS_X/ABS_Y with contact reported via BTN_TOUCH.\n")
             f.write("# Calibration matrix for libinput/Wayland.\n")
