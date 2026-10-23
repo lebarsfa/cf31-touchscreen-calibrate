@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""3-point affine calibration for the Panasonic CF-31/CF-19 Fujitsu touch panel.
+"""3-point affine calibration primarily for the Panasonic CF-31/CF-19 Fujitsu touch panel.
 
 Some panels report ABS_X/ABS_Y but signals contact with BTN_LEFT rather than
 BTN_TOUCH, and never sets INPUT_PROP_DIRECT. udev therefore tags it
@@ -29,6 +29,7 @@ FMT, SZ = 'llHHi', 24
 
 def select_model():
     print("Select Panasonic Toughbook model:")
+    print("  0) Unknown")
     print("  1) CF-31 Mk5")
     print("  2) CF-19 Mk4")
     print("  3) CF-19 Mk5")
@@ -36,26 +37,46 @@ def select_model():
 
     while True:
         try:
-            answer = input("\nModel [1/2/3/4]: ").strip()
+            model = input("\nModel [0/1/2/3/4]: ").strip()
         except EOFError:
             sys.exit("No model selected.")
 
-        if answer == '1':
-            return "CF-31 Mk5", ("0430", "0502"), BTN_LEFT
-        elif answer == '2':
-            return "CF-19 Mk4", ("0430", "0530"), BTN_TOUCH
-        elif answer == '3':
-            return "CF-19 Mk5", ("0430", "0532"), BTN_TOUCH
-        elif answer == '4':
-            return "CF-19 Mk7", ("0430", "056b"), BTN_TOUCH
+        if model == '0':
+            print("To get the required info, you might need to run "
+                  "'sudo apt-get -y install libinput-tools evtest ; sudo libinput list-devices' "
+                  "and identify the /dev/input/eventX device corresponding to the touchscreen. "
+                  "You can then examine its events with, e.g., 'sudo evtest /dev/input/event4'.")
+            dev_name = input("Enter touchscreen device name (e.g. 'Fujitsu Component USB Touch Panel'): ").strip()
+            while not dev_name:
+                print("Device name cannot be empty.")
+                dev_name = input("Enter touchscreen device name: ").strip()
+            while True:
+                usb_id = input("Enter touchscreen USB device ID vendor:product (e.g. '0430:056b'): ").strip()
+                if re.match(r'^[0-9a-fA-F]{4}:[0-9a-fA-F]{4}$', usb_id):
+                    vendor, product = usb_id.lower().split(':')
+                    while True:
+                        touch_button = input("A (BTN_TOUCH) or B (BTN_LEFT): ").strip().upper()
+                        if touch_button == 'A':
+                            return "Unknown", (vendor, product), BTN_TOUCH, dev_name
+                        elif touch_button == 'B':
+                            return "Unknown", (vendor, product), BTN_LEFT, dev_name
+                        print("Please enter A or B.")
+                print("Invalid device ID format.")
+        if model == '1':
+            return "CF-31 Mk5", ("0430", "0502"), BTN_LEFT, DEV_NAME
+        elif model == '2':
+            return "CF-19 Mk4", ("0430", "0530"), BTN_TOUCH, DEV_NAME
+        elif model == '3':
+            return "CF-19 Mk5", ("0430", "0532"), BTN_TOUCH, DEV_NAME
+        elif model == '4':
+            return "CF-19 Mk7", ("0430", "056b"), BTN_TOUCH, DEV_NAME
+        print("Please enter 0, 1, 2, 3, or 4.")
 
-        print("Please enter 1, 2, 3, or 4.")
-
-def find_device():
+def find_device(dev_name):
     """Return (devnode, sysfs_path) for the touch panel."""
     blob = open('/proc/bus/input/devices').read()
     for chunk in blob.split('\n\n'):
-        if DEV_NAME not in chunk:
+        if dev_name not in chunk:
             continue
         ev = re.search(r'(event\d+)', chunk)
         sysfs = re.search(r'S: Sysfs=(\S+)', chunk)
@@ -63,7 +84,7 @@ def find_device():
             return '/dev/input/' + ev.group(1), (sysfs.group(1) if sysfs else '')
     sys.exit("Could not find '%s' in /proc/bus/input/devices.\n"
              "If the panel is absent, see the README - on some units it fails\n"
-             "to enumerate at boot entirely." % DEV_NAME)
+             "to enumerate at boot entirely." % dev_name)
 
 
 def usb_port(sysfs):
@@ -131,25 +152,25 @@ def main():
     if os.geteuid() != 0:
         sys.exit("Run with sudo.")
 
-    model, USB_ID, TOUCH_BUTTON = select_model()
+    model, usb_id, touch_button, dev_name = select_model()
 
     print("\nModel    : %s" % model)
 
-    dev, sysfs = find_device()
+    dev, sysfs = find_device(dev_name)
     port = usb_port(sysfs)
     fd = os.open(dev, os.O_RDONLY)
     _, xmin, xmax, _, _, _ = absinfo(fd, ABS_X)
     _, ymin, ymax, _, _, _ = absinfo(fd, ABS_Y)
-    print("Device   : %s  (%s)" % (dev, DEV_NAME))
+    print("Device   : %s  (%s)" % (dev, dev_name))
     print("Ranges   : X %d..%d   Y %d..%d" % (xmin, xmax, ymin, ymax))
-    print("USB ID   : %s:%s" % USB_ID)
+    print("USB ID   : %s:%s" % usb_id)
     print("USB port : %s" % (port or "unknown (will need a reboot to apply)"))
     print("\nTouch each corner as close to the very edge of the glass as you can.")
     print("Accuracy here sets accuracy everywhere. Ctrl-C to abort.")
 
     grab(fd, True)
     try:
-        pts = [capture(fd, l, TOUCH_BUTTON)
+        pts = [capture(fd, l, touch_button)
                for l in ("TOP-LEFT", "TOP-RIGHT", "BOTTOM-LEFT")]
     finally:
         grab(fd, False)
@@ -168,18 +189,18 @@ def main():
         print("  Note: X and Y are SWAPPED on this panel (the matrix corrects it).")
     print("=" * 62)
 
-    if model == "CF-19 Mk4" or model == "CF-19 Mk5" or model == "CF-19 Mk7":
+    if touch_button == BTN_LEFT:
+        line = ('SUBSYSTEM=="input", ATTRS{idVendor}=="%s", '
+                'ATTRS{idProduct}=="%s", '
+                'ENV{LIBINPUT_CALIBRATION_MATRIX}="%s"\n'
+                % (usb_id[0], usb_id[1],
+                   " ".join("%.6f" % v for v in m)))
+    else:
         line = ('SUBSYSTEM=="input", ATTRS{idVendor}=="%s", '
                 'ATTRS{idProduct}=="%s", ENV{ID_INPUT_TABLET}="0", '
                 'ENV{ID_INPUT_TOUCHSCREEN}="1", '
                 'ENV{LIBINPUT_CALIBRATION_MATRIX}="%s"\n'
-                % (USB_ID[0], USB_ID[1],
-                   " ".join("%.6f" % v for v in m)))
-    else:
-        line = ('SUBSYSTEM=="input", ATTRS{idVendor}=="%s", '
-                'ATTRS{idProduct}=="%s", '
-                'ENV{LIBINPUT_CALIBRATION_MATRIX}="%s"\n'
-                % (USB_ID[0], USB_ID[1],
+                % (usb_id[0], usb_id[1],
                    " ".join("%.6f" % v for v in m)))
 
     try:
@@ -191,17 +212,20 @@ def main():
         return
 
     with open(RULE, 'w') as f:
-        f.write("# Panasonic Toughbook %s Fujitsu touch panel "
-                "(USB %s:%s).\n" % (model, USB_ID[0], USB_ID[1]))
-        if model == "CF-19 Mk4" or model == "CF-19 Mk5" or model == "CF-19 Mk7":
-            f.write("# Device: Fujitsu Component USB Touch Panel\n")
-            f.write("# The panel reports ABS_X/ABS_Y with contact reported via BTN_TOUCH.\n")
-            f.write("# Calibration matrix for libinput/Wayland.\n")
+        if model == "Unknown":
+            f.write("# %s (USB %s:%s).\n" %
+                    (dev_name, usb_id[0], usb_id[1]))
         else:
-            f.write("# The panel reports ABS_X/ABS_Y with no BTN_TOUCH and no\n")
-            f.write("# INPUT_PROP_DIRECT, so udev tags it ID_INPUT_MOUSE and ordinary\n")
+            f.write("# Panasonic Toughbook %s Fujitsu touch panel "
+                    "(USB %s:%s).\n" % (model, usb_id[0], usb_id[1]))
+        if touch_button == BTN_LEFT:
+            f.write("# The panel is assumed to report ABS_X/ABS_Y with no BTN_TOUCH and no\n")
+            f.write("# INPUT_PROP_DIRECT, so udev may tag it ID_INPUT_MOUSE and ordinary\n")
             f.write("# calibration tools cannot see it. libinput applies this matrix\n")
             f.write("# regardless of that misclassification.\n")
+        else:
+            f.write("# The panel is assumed to report ABS_X/ABS_Y with contact reported via BTN_TOUCH.\n")
+            f.write("# Calibration matrix for libinput/Wayland.\n")
         f.write("# Regenerate with calibrate-touchscreen.py; delete to reset.\n")
         f.write(line)
     print("Wrote %s" % RULE)
