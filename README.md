@@ -4,7 +4,7 @@ Touchscreen calibration for the Panasonic Toughbook CF-31/CF-19 Fujitsu touch pa
 on Wayland, where `xinput_calibrator` and GNOME's touchscreen settings cannot see the
 device at all.
 
-Tested working on a CF-31 Mk5/CF-19 Mk4, Ubuntu 24.04, GNOME/Wayland.
+Tested working on a CF-31 Mk5/CF-19 Mk4/CF-19 Mk7, Ubuntu 24.04, GNOME/Wayland.
 
 > **LLM-generated.** Written by Claude (Anthropic), from live diagnosis of a real PC,
 > and confirmed working on that hardware. It runs as root and writes a udev rule — read

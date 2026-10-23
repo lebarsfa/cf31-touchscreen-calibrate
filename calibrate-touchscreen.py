@@ -31,10 +31,11 @@ def select_model():
     print("Select Panasonic Toughbook model:")
     print("  1) CF-31 Mk5")
     print("  2) CF-19 Mk4")
+    print("  3) CF-19 Mk7")
 
     while True:
         try:
-            answer = input("\nModel [1/2]: ").strip()
+            answer = input("\nModel [1/2/3]: ").strip()
         except EOFError:
             sys.exit("No model selected.")
 
@@ -42,8 +43,10 @@ def select_model():
             return "CF-31 Mk5", ("0430", "0502"), BTN_LEFT
         elif answer == '2':
             return "CF-19 Mk4", ("0430", "0530"), BTN_TOUCH
+        elif answer == '3':
+            return "CF-19 Mk7", ("0430", "056b"), BTN_TOUCH
 
-        print("Please enter 1 or 2.")
+        print("Please enter 1, 2, or 3.")
 
 
 def find_device():
@@ -163,7 +166,7 @@ def main():
         print("  Note: X and Y are SWAPPED on this panel (the matrix corrects it).")
     print("=" * 62)
 
-    if model == "CF-19 Mk4":
+    if model == "CF-19 Mk4" or model == "CF-19 Mk7":
         line = ('SUBSYSTEM=="input", ATTRS{idVendor}=="%s", '
                 'ATTRS{idProduct}=="%s", ENV{ID_INPUT_TABLET}="0", '
                 'ENV{ID_INPUT_TOUCHSCREEN}="1", '
@@ -186,15 +189,13 @@ def main():
         return
 
     with open(RULE, 'w') as f:
-        if model == "CF-19 Mk4":
-            f.write("# Panasonic Toughbook CF-19 Mk4 Fujitsu touch panel "
-                    "(USB %s:%s).\n" % USB_ID)
+        f.write("# Panasonic Toughbook %s Fujitsu touch panel "
+                "(USB %s:%s).\n" % (model, USB_ID[0], USB_ID[1]))
+        if model == "CF-19 Mk4" or model == "CF-19 Mk7":
             f.write("# Device: Fujitsu Component USB Touch Panel\n")
             f.write("# The panel reports ABS_X/ABS_Y with contact reported via BTN_TOUCH.\n")
             f.write("# Calibration matrix for libinput/Wayland.\n")
         else:
-            f.write("# Panasonic Toughbook CF-31 Mk5 Fujitsu touch panel "
-                    "(USB %s:%s).\n" % USB_ID)
             f.write("# The panel reports ABS_X/ABS_Y with no BTN_TOUCH and no\n")
             f.write("# INPUT_PROP_DIRECT, so udev tags it ID_INPUT_MOUSE and ordinary\n")
             f.write("# calibration tools cannot see it. libinput applies this matrix\n")
